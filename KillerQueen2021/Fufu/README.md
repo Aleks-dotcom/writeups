@@ -1,4 +1,4 @@
-### Code analysis
+# Code analysis
 ## main
 We can see that main will run in a loop asking us to input a number and calling one of the 3 functions or
 exiting right away.
@@ -47,7 +47,7 @@ The fact that display is implemented using puts and not something like write wil
 
 reset is also quite straightforward. It resets the pointer we are currently working with.
 
-### Vulnerability
+# Vulnerability
 
 ## inbuf
 
@@ -56,7 +56,7 @@ The vulnerability lies in the custom inbuf function that uses a char type counte
 
 I found no other vulnerabilities in this bin. But this is more than enough to get a shell.
 
-### Exploitation
+# Exploitation
 
 ## checksec
 
