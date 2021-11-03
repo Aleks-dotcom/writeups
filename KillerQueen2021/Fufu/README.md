@@ -597,6 +597,7 @@ then I malloc from tcache 0x51 chunk E and with that free chunk D back into tcah
 ```
 create(0,0x40, b'VVV')
 ```
+```
 0x56257ccda290:	0x0000000000000000	0x0000000000000021 <--- chunk D. Free
 0x56257ccda2a0:	0x0000000000000000	0x000056257ccda010
 0x56257ccda2b0:	0x0000000000000000	0x0000000000000051 <--- chunk E. Malloc
