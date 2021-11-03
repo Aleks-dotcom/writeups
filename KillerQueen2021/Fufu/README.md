@@ -1,3 +1,25 @@
+- [fufu writeup from KillerQueen2021 CTF](#fufu-writeup-from-killerqueen2021-ctf)
+- [CODE ANALYSIS](#code-analysis)
+  - [main](#main)
+  - [menu](#menu)
+  - [create](#create)
+  - [inbuf](#inbuf)
+  - [display](#display)
+  - [reset](#reset)
+- [Vulnerability](#vulnerability)
+  - [inbuf](#inbuf-1)
+- [EXPLOITATION](#exploitation)
+  - [checksec](#checksec)
+  - [libc](#libc)
+  - [leaking libc](#leaking-libc)
+  - [unsorted bin](#unsorted-bin)
+  - [deal with the null termination in inbuf](#deal-with-the-null-termination-in-inbuf)
+  - [state of the heap after the leak](#state-of-the-heap-after-the-leak)
+  - [getting a shell](#getting-a-shell)
+  - [tache poison in libc 2.31](#tache-poison-in-libc-231)
+- [CONCLUSION](#conclusion)
+
+
 # fufu writeup from KillerQueen2021 CTF
 
 I played KQ with my team DragonSec SI. We ended up winning and during the competition I was able to solve 2 pwnables one of them being this one. I found the challenges very interesting and so decided to write this writeup.
