@@ -56,15 +56,13 @@ The vulnerability lies in the custom inbuf function that uses a char type counte
 
 I found no other vulnerabilities in this bin. But this is more than enough to get a shell.
 
-### Plan of attack
+### Exploitation
 
-## problems and restrictions
-
-# checksec
+## checksec
 
 if we run the checksec tool in our binary we see that pie is enabled and that there are no canaries and no full relro.
 
-# libc
+## libc
 
 if we run strings on the libc and grep for glibc we can see that the libc we are dealing with is 2.31
 I used patchelf to patch the binary to use the libc and ld provided.
@@ -110,7 +108,7 @@ create(0,0x40, b'VVV') <--- chunk E
 create(0,0x90,"FFFFFF") <--- chunk F
 ```
 
-# unsorted bin
+## unsorted bin
 
 Usually how we get libc addresses on heap is by using unsorted bins. The idea is to malloc a large enough chunk(>0x408) that when freed it ends up in the unsorted bin. At that point libc addresses are put in its fw and bk pointers. The problem we are facing is that when a big chunk like that is freed and there are no other chunks between it and the top chunk it will get consolidated and our plan won't work.
 
@@ -377,7 +375,7 @@ the state of the heap after the call for malloc(0xe0):
 
 you might wonder why chunk A shrunk. That is to do with the way the unsorted bins serves the allocations. Whenever there is a request by malloc for new chunk of a given size, if the tcache of that size is empty and the fastbin of that size is also empty, the new chunk will come out of the unsorted bin by substracting its size from the size of the chunk currently in unsorted bin. In our case 0x420-0xf0 = 0x330.
 
-# deal with the null termination in inbuf
+## deal with the null termination in inbuf
 I mentioned that the size 0xe0 was not chosen randomly. It is actually more than that, if we request any larger or smaller sized chunk the next part of the exploit will fail. The whole point of even allocating here is to push the libc pointers lower down the heap so that chunk A overlaps with chunk B in a very specific way
 
 ```
@@ -573,7 +571,7 @@ display(0)
 
 For this part we will make use of the 3 chunks we allocated and freed before(D,E,F)
 
-# tache poison in libc 2.31
+## tache poison in libc 2.31
 
 The goal is to poison the tcache and get a chunk at __free_hook and overwrite it with system and then free("/bin/sh")
 
