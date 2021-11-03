@@ -1,5 +1,5 @@
 ### Code analysis
 ## main
-![image](/screenshots/main.png?raw=true "main")
+![image](/KillerQueen2021/Fufu/screenshots/main.png?raw=true "main")
 
 
